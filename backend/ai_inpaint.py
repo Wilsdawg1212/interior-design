@@ -8,6 +8,7 @@ import io
 import json
 import numpy as np
 from fastapi.middleware.cors import CORSMiddleware
+from rembg import remove
 
 app = FastAPI()
 
@@ -84,5 +85,15 @@ async def inpaint_image(
         result.save(buf, format="PNG")
     else:
         raise TypeError(f"Result is not a PIL Image, got {type(result)}")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
+
+@app.post("/remove_bg/")
+async def remove_bg_endpoint(image: UploadFile = File(...)):
+    image_bytes = await image.read()
+    input_image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    output_image = remove(input_image)
+    buf = io.BytesIO()
+    output_image.save(buf, format="PNG")
     buf.seek(0)
     return StreamingResponse(buf, media_type="image/png")

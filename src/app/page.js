@@ -21,6 +21,7 @@ export default function Home() {
   const [prompt, setPrompt] = useState('');
   const [roomImageWidth, setRoomImageWidth] = useState(null);
   const [roomImageHeight, setRoomImageHeight] = useState(null);
+  const [isRemovingBg, setIsRemovingBg] = useState(false);
 
   const CANVAS_WIDTH = 800;
   const CANVAS_HEIGHT = 384;
@@ -41,27 +42,55 @@ export default function Home() {
   }, [])
 
   const handleFurnitureUpload = useCallback((files) => {
-    const newFurniture = Array.from(files).map((file, index) => {
-      const reader = new FileReader()
-      return new Promise((resolve) => {
-        reader.onload = (e) => {
-          resolve({
-            id: `furniture-${Date.now()}-${index}`,
-            image: e.target.result,
-            name: file.name,
-            position: { x: 100 + index * 50, y: 100 + index * 50 },
-            scale: 1,
-            rotation: 0,
-            isSelected: false
-          })
-        }
-        reader.readAsDataURL(file)
-      })
-    })
+    setIsRemovingBg(true);
+    const newFurniture = Array.from(files).map(async (file, index) => {
+      // Send to /remove_bg/ endpoint
+      const formData = new FormData();
+      formData.append('image', file);
+      const response = await fetch('http://localhost:8000/remove_bg/', {
+        method: 'POST',
+        body: formData
+      });
+      if (!response.ok) {
+        // fallback to original image if background removal fails
+        const reader = new FileReader();
+        return await new Promise((resolve) => {
+          reader.onload = (e) => {
+            resolve({
+              id: `furniture-${Date.now()}-${index}`,
+              image: e.target.result,
+              name: file.name,
+              position: { x: 100 + index * 50, y: 100 + index * 50 },
+              scale: 1,
+              rotation: 0,
+              isSelected: false
+            });
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+      const blob = await response.blob();
+      // Convert blob to data URL
+      const dataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+      return {
+        id: `furniture-${Date.now()}-${index}`,
+        image: dataUrl,
+        name: file.name,
+        position: { x: 100 + index * 50, y: 100 + index * 50 },
+        scale: 1,
+        rotation: 0,
+        isSelected: false
+      };
+    });
 
     Promise.all(newFurniture).then((items) => {
-      setFurnitureItems(prev => [...prev, ...items])
-    })
+      setFurnitureItems(prev => [...prev, ...items]);
+      setIsRemovingBg(false);
+    });
   }, [])
 
   const updateFurniturePosition = useCallback((id, position) => {
