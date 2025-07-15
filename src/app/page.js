@@ -42,54 +42,26 @@ export default function Home() {
   }, [])
 
   const handleFurnitureUpload = useCallback((files) => {
-    setIsRemovingBg(true);
-    const newFurniture = Array.from(files).map(async (file, index) => {
-      // Send to /remove_bg/ endpoint
-      const formData = new FormData();
-      formData.append('image', file);
-      const response = await fetch('http://localhost:8000/remove_bg/', {
-        method: 'POST',
-        body: formData
+    const newFurniture = Array.from(files).map((file, index) => {
+      const reader = new FileReader();
+      return new Promise((resolve) => {
+        reader.onload = (e) => {
+          resolve({
+            id: `furniture-${Date.now()}-${index}`,
+            image: e.target.result,
+            name: file.name,
+            position: { x: 100 + index * 50, y: 100 + index * 50 },
+            scale: 1,
+            rotation: 0,
+            isSelected: false
+          });
+        };
+        reader.readAsDataURL(file);
       });
-      if (!response.ok) {
-        // fallback to original image if background removal fails
-        const reader = new FileReader();
-        return await new Promise((resolve) => {
-          reader.onload = (e) => {
-            resolve({
-              id: `furniture-${Date.now()}-${index}`,
-              image: e.target.result,
-              name: file.name,
-              position: { x: 100 + index * 50, y: 100 + index * 50 },
-              scale: 1,
-              rotation: 0,
-              isSelected: false
-            });
-          };
-          reader.readAsDataURL(file);
-        });
-      }
-      const blob = await response.blob();
-      // Convert blob to data URL
-      const dataUrl = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.readAsDataURL(blob);
-      });
-      return {
-        id: `furniture-${Date.now()}-${index}`,
-        image: dataUrl,
-        name: file.name,
-        position: { x: 100 + index * 50, y: 100 + index * 50 },
-        scale: 1,
-        rotation: 0,
-        isSelected: false
-      };
     });
 
     Promise.all(newFurniture).then((items) => {
       setFurnitureItems(prev => [...prev, ...items]);
-      setIsRemovingBg(false);
     });
   }, [])
 
@@ -135,6 +107,63 @@ export default function Home() {
       setSelectedFurniture(null)
     }
   }, [selectedFurniture])
+
+  const removeBackground = useCallback(async (furnitureItemsToProcess = furnitureItems) => {
+    if (furnitureItemsToProcess.length === 0) {
+      alert('No furniture items to process');
+      return;
+    }
+
+    setIsRemovingBg(true);
+    try {
+      const updatedItems = await Promise.all(
+        furnitureItemsToProcess.map(async (item) => {
+          // Convert data URL back to file for API
+          const response = await fetch(item.image);
+          const blob = await response.blob();
+          const file = new File([blob], item.name, { type: 'image/png' });
+
+          // Send to /remove_bg/ endpoint
+          const formData = new FormData();
+          formData.append('image', file);
+          const bgResponse = await fetch('http://localhost:8000/remove_bg/', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!bgResponse.ok) {
+            console.warn(`Failed to remove background for ${item.name}, keeping original`);
+            return item; // Keep original if background removal fails
+          }
+
+          const bgBlob = await bgResponse.blob();
+          // Convert blob to data URL
+          const dataUrl = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(bgBlob);
+          });
+
+          return {
+            ...item,
+            image: dataUrl
+          };
+        })
+      );
+
+      setFurnitureItems(prev => 
+        prev.map(item => {
+          const updatedItem = updatedItems.find(updated => updated.id === item.id);
+          return updatedItem || item;
+        })
+      );
+    } catch (error) {
+      console.error('Error removing backgrounds:', error);
+      alert('Error removing backgrounds: ' + error.message);
+    } finally {
+      setIsRemovingBg(false);
+    }
+  }, [furnitureItems]);
 
   const handleAIPlacement = useCallback(() => {
     if (furnitureItems.length === 0) return
@@ -394,6 +423,7 @@ export default function Home() {
                 onScaleChange={updateFurnitureScale}
                 onRotationChange={updateFurnitureRotation}
                 onRemove={() => selectedFurniture && removeFurniture(selectedFurniture)}
+                onRemoveBackground={() => selectedFurniture && removeBackground([furnitureItems.find(item => item.id === selectedFurniture)])}
               />
 
               {/* Furniture Panel */}

@@ -2,7 +2,8 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi import Request
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_inpaint import StableDiffusionInpaintPipeline
-from PIL import Image, ImageDraw
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import StableDiffusionImg2ImgPipeline
+from PIL import Image, ImageDraw, ImageFilter
 import torch
 import io
 import json
@@ -20,8 +21,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-pipe = StableDiffusionInpaintPipeline.from_pretrained(
-    "runwayml/stable-diffusion-inpainting",
+pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
+    "runwayml/stable-diffusion-v1-5",
     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
 )
 pipe.to("cuda" if torch.cuda.is_available() else "cpu")
@@ -60,33 +61,28 @@ async def inpaint_image(
     furniture_list = json.loads(furniture)
     mask = create_furniture_mask(mask_size, furniture_list)
 
-    output = pipe(prompt=prompt, image=img, mask_image=mask)
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=8))
 
-    # Handle return formats
-    if isinstance(output, tuple):
-        result_raw = output[0]
-    else:
-        result_raw = output.images
-    if isinstance(result_raw, list):
-        result = result_raw[0]
-    elif hasattr(result_raw, 'save'):
-        result = result_raw
-    elif isinstance(result_raw, torch.Tensor):
-        arr = result_raw.cpu().numpy()
-        result = Image.fromarray(arr.astype(np.uint8))
-    elif isinstance(result_raw, np.ndarray):
-        result = Image.fromarray(result_raw.astype(np.uint8))
-    else:
-        raise TypeError(f"Unexpected output type: {type(result_raw)}")
+        # Composite furniture mask over original (if needed)
+    img_np = np.array(img).astype(np.uint8)
+    mask_np = np.array(mask).astype(np.float32) / 255.0
+    blended = (img_np * mask_np[..., None] + img_np * (1 - mask_np[..., None])).astype(np.uint8)
+    blended_img = Image.fromarray(blended)
 
-    # Save result to buffer
+        # Refine using Img2Img
+    result = pipe(
+        prompt="photorealistic object blended into scene, realistic lighting, soft shadows",
+        image=blended_img,
+        strength=0.15,  # Low = gentle refinement
+        guidance_scale=6.5
+    ).images[0]
+
+    # Save result
     buf = io.BytesIO()
-    if isinstance(result, Image.Image):
-        result.save(buf, format="PNG")
-    else:
-        raise TypeError(f"Result is not a PIL Image, got {type(result)}")
+    result.save(buf, format="PNG")
     buf.seek(0)
     return StreamingResponse(buf, media_type="image/png")
+
 
 @app.post("/remove_bg/")
 async def remove_bg_endpoint(image: UploadFile = File(...)):

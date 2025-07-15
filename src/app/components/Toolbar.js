@@ -9,7 +9,8 @@ import {
   Minimize2, 
   Trash2, 
   Move,
-  Settings
+  Settings,
+  Image
 } from 'lucide-react'
 
 export default function Toolbar({ 
@@ -17,7 +18,8 @@ export default function Toolbar({
   furnitureItems,
   onScaleChange, 
   onRotationChange, 
-  onRemove 
+  onRemove,
+  onRemoveBackground
 }) {
   const [scale, setScale] = useState(1)
   const [rotation, setRotation] = useState(0)
@@ -166,13 +168,22 @@ export default function Toolbar({
               <span>Reset</span>
             </button>
             
-            <button
-              onClick={onRemove}
-              className="bg-red-50 hover:bg-red-100 text-red-700 font-medium text-xs py-2 px-3 rounded-lg border border-red-200 transition-colors duration-200 flex items-center justify-center space-x-1"
-            >
-              <Trash2 className="w-3 h-3" />
-              <span>Remove</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={onRemove}
+                className="btn-secondary flex items-center space-x-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Remove</span>
+              </button>
+              <button
+                onClick={onRemoveBackground}
+                className="btn-secondary flex items-center space-x-2"
+              >
+                <Image className="w-4 h-4" />
+                <span>Remove BG</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
