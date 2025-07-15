@@ -48,7 +48,9 @@ export default function RoomCanvas({
   furnitureItems, 
   onFurnitureUpdate, 
   onFurnitureSelect, 
-  selectedFurniture 
+  selectedFurniture, 
+  width, 
+  height 
 }) {
   const canvasRef = useRef(null)
 
@@ -64,6 +66,14 @@ export default function RoomCanvas({
     onFurnitureUpdate(item.id, newPosition)
   }, [furnitureItems, onFurnitureUpdate])
 
+  if (!width || !height) {
+    return (
+      <div className="card p-0 overflow-hidden flex items-center justify-center" style={{ minHeight: 200 }}>
+        <div className="text-neutral-400">Upload a room image to start designing</div>
+      </div>
+    );
+  }
+
   return (
     <div className="card p-0 overflow-hidden">
       <div className="p-4 border-b border-neutral-200">
@@ -77,13 +87,8 @@ export default function RoomCanvas({
       <DndContext onDragEnd={handleDragEnd}>
         <div 
           ref={canvasRef}
-          className="relative w-full h-96 bg-neutral-100 overflow-hidden"
-          style={{
-            backgroundImage: roomImage ? `url(${roomImage})` : 'none',
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat'
-          }}
+          className="relative bg-neutral-100 overflow-hidden"
+          style={{ width: width + 'px', height: height + 'px', backgroundImage: roomImage ? `url(${roomImage})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }}
         >
           {!roomImage && (
             <div className="absolute inset-0 flex items-center justify-center">

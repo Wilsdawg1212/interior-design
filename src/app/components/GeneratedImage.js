@@ -7,7 +7,9 @@ export default function GeneratedImage({
   generatedImage, 
   isGenerating, 
   onRegenerate, 
-  onDownload 
+  onDownload, 
+  width, 
+  height 
 }) {
   if (!generatedImage && !isGenerating) {
     return null
@@ -94,7 +96,7 @@ export default function GeneratedImage({
                 <img
                   src={generatedImage}
                   alt="AI Generated Interior Design"
-                  className="w-full h-auto rounded-xl shadow-lg border border-neutral-200"
+                  style={{ width: width ? width + 'px' : 'auto', height: height ? height + 'px' : 'auto', objectFit: 'cover', display: 'block', margin: '0 auto', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #e5e7eb' }}
                 />
                 
                 {/* Overlay with actions */}

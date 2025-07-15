@@ -1,13 +1,23 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
+from fastapi import Request
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_inpaint import StableDiffusionInpaintPipeline
-from PIL import Image
+from PIL import Image, ImageDraw
 import torch
-import torchvision.transforms as T
-import numpy as np
 import io
+import json
+import numpy as np
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or specify your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 pipe = StableDiffusionInpaintPipeline.from_pretrained(
     "runwayml/stable-diffusion-inpainting",
@@ -15,31 +25,54 @@ pipe = StableDiffusionInpaintPipeline.from_pretrained(
 )
 pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 
+CANVAS_WIDTH = 800  # Must match frontend
+CANVAS_HEIGHT = 384
+
+def create_furniture_mask(image_size, furniture_list):
+    mask = Image.new('L', image_size, 0)  # Black background
+    draw = ImageDraw.Draw(mask)
+    for furniture in furniture_list:
+        x, y = furniture['x'], furniture['y']
+        w, h = furniture['width'], furniture['height']
+        draw.rectangle([x, y, x + w, y + h], fill=255)
+    return mask
+
 @app.post("/inpaint/")
 async def inpaint_image(
+    request: Request,
     image: UploadFile = File(...),
-    mask: UploadFile = File(...),
-    prompt: str = Form(...)
+    prompt: str = Form(...),
+    furniture: str = Form(...),  # JSON string
+    width: int = Form(None),
+    height: int = Form(None),
 ):
     image_bytes = await image.read()
-    mask_bytes = await mask.read()
-
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    msk = Image.open(io.BytesIO(mask_bytes)).convert("RGB").resize(img.size)
-
-    output = pipe(prompt=prompt, image=img, mask_image=msk)
-
-    # Determine what kind of result we got
-    if isinstance(output, tuple):
-        result_raw = output[0]  # Tensor or ndarray
+    # Resize to match frontend canvas if width/height provided
+    if width and height:
+        img = img.resize((width, height), Image.Resampling.LANCZOS)
+        mask_size = (width, height)
     else:
-        result_raw = output.images  # Should be list of PIL Images
+        mask_size = img.size
 
-    # Convert to PIL.Image if needed
+    # Parse furniture JSON
+    furniture_list = json.loads(furniture)
+    mask = create_furniture_mask(mask_size, furniture_list)
+
+    output = pipe(prompt=prompt, image=img, mask_image=mask)
+
+    # Handle return formats
+    if isinstance(output, tuple):
+        result_raw = output[0]
+    else:
+        result_raw = output.images
     if isinstance(result_raw, list):
         result = result_raw[0]
+    elif hasattr(result_raw, 'save'):
+        result = result_raw
     elif isinstance(result_raw, torch.Tensor):
-        result = T.ToPILImage()(result_raw.squeeze())
+        arr = result_raw.cpu().numpy()
+        result = Image.fromarray(arr.astype(np.uint8))
     elif isinstance(result_raw, np.ndarray):
         result = Image.fromarray(result_raw.astype(np.uint8))
     else:
@@ -47,6 +80,9 @@ async def inpaint_image(
 
     # Save result to buffer
     buf = io.BytesIO()
-    result.save(buf, format="PNG")
+    if isinstance(result, Image.Image):
+        result.save(buf, format="PNG")
+    else:
+        raise TypeError(f"Result is not a PIL Image, got {type(result)}")
     buf.seek(0)
     return StreamingResponse(buf, media_type="image/png")

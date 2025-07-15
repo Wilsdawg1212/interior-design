@@ -8,6 +8,7 @@ import UploadZone from './components/UploadZone'
 import FurniturePanel from './components/FurniturePanel'
 import Toolbar from './components/Toolbar'
 import GeneratedImage from './components/GeneratedImage'
+import { compositeRoomWithFurniture } from './components/canvasUtils'
 
 export default function Home() {
   const [roomImage, setRoomImage] = useState(null)
@@ -17,11 +18,24 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedImage, setGeneratedImage] = useState(null)
   const generatedImageRef = useRef(null)
+  const [prompt, setPrompt] = useState('');
+  const [roomImageWidth, setRoomImageWidth] = useState(null);
+  const [roomImageHeight, setRoomImageHeight] = useState(null);
+
+  const CANVAS_WIDTH = 800;
+  const CANVAS_HEIGHT = 384;
 
   const handleRoomUpload = useCallback((file) => {
     const reader = new FileReader()
     reader.onload = (e) => {
       setRoomImage(e.target.result)
+      // Get natural size
+      const img = new window.Image();
+      img.onload = () => {
+        setRoomImageWidth(img.naturalWidth);
+        setRoomImageHeight(img.naturalHeight);
+      };
+      img.src = e.target.result;
     }
     reader.readAsDataURL(file)
   }, [])
@@ -111,28 +125,49 @@ export default function Home() {
   }, [furnitureItems])
 
   const handleGenerateRealisticPicture = useCallback(async () => {
-    if (!roomImage || furnitureItems.length === 0) {
+    if (!roomImage || furnitureItems.length === 0 || !roomImageWidth || !roomImageHeight) {
       alert('Please upload a room image and add some furniture first!')
       return
     }
 
     setIsGenerating(true)
-    
-    // Simulate AI generation process
-    setTimeout(() => {
-      setIsGenerating(false)
-      // For demo purposes, use a placeholder image
-      setGeneratedImage('https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&h=600&fit=crop&crop=center')
-      
-      // Scroll to the generated image
+
+    try {
+      // Prepare form data
+      const formData = new FormData();
+      // Composite room and furniture into one image
+      const compositeBlob = await compositeRoomWithFurniture(roomImage, furnitureItems, roomImageWidth, roomImageHeight);
+      formData.append('image', compositeBlob, 'room.png');
+      formData.append('prompt', prompt || 'A beautiful, realistic interior design');
+      formData.append('furniture', JSON.stringify(
+        furnitureItems.map(item => ({
+          x: item.position.x,
+          y: item.position.y,
+          width: 100 * item.scale, // assuming 100px base width
+          height: 100 * item.scale // assuming 100px base height
+        }))
+      ));
+      formData.append('width', roomImageWidth);
+      formData.append('height', roomImageHeight);
+
+      // Call backend
+      const response = await fetch('http://localhost:8000/inpaint/', {
+        method: 'POST',
+        body: formData
+      });
+      if (!response.ok) throw new Error('Failed to generate image');
+      const blobResult = await response.blob();
+      const url = URL.createObjectURL(blobResult);
+      setGeneratedImage(url);
       setTimeout(() => {
-        generatedImageRef.current?.scrollIntoView({ 
-          behavior: 'smooth',
-          block: 'center'
-        })
-      }, 100)
-    }, 3000)
-  }, [roomImage, furnitureItems])
+        generatedImageRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    } catch (err) {
+      alert('Error generating image: ' + err.message);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [roomImage, furnitureItems, prompt, roomImageWidth, roomImageHeight]);
 
   const handleRegenerate = useCallback(() => {
     handleGenerateRealisticPicture()
@@ -252,10 +287,21 @@ export default function Home() {
                 onFurnitureUpdate={updateFurniturePosition}
                 onFurnitureSelect={selectFurniture}
                 selectedFurniture={selectedFurniture}
+                width={roomImageWidth}
+                height={roomImageHeight}
               />
-              
+
+              {/* Prompt input */}
+              <input
+                type="text"
+                value={prompt}
+                onChange={e => setPrompt(e.target.value)}
+                placeholder="Describe your desired room..."
+                className="input-field mb-4 w-full mt-6"
+              />
+
               {/* Generate Realistic Picture Button */}
-              <div className="mt-6 flex justify-center">
+              <div className="mt-2 flex flex-col items-center space-y-2">
                 <motion.button
                   onClick={handleGenerateRealisticPicture}
                   disabled={!roomImage || furnitureItems.length === 0 || isGenerating}
@@ -283,6 +329,24 @@ export default function Home() {
                     )}
                   </div>
                 </motion.button>
+                {/* Test Composite Canvas Button */}
+                <button
+                  type="button"
+                  className="btn-secondary mt-2 px-4 py-2 rounded-lg text-sm font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition"
+                  disabled={!roomImage || furnitureItems.length === 0}
+                  onClick={async () => {
+                    try {
+                      if (!roomImageWidth || !roomImageHeight) throw new Error('Room image size not loaded');
+                      const blob = await compositeRoomWithFurniture(roomImage, furnitureItems, roomImageWidth, roomImageHeight);
+                      const url = URL.createObjectURL(blob);
+                      window.open(url, '_blank');
+                    } catch (err) {
+                      alert('Failed to create composite image: ' + err.message);
+                    }
+                  }}
+                >
+                  Test Composite Canvas
+                </button>
               </div>
             </motion.div>
           </div>
@@ -321,6 +385,8 @@ export default function Home() {
             isGenerating={isGenerating}
             onRegenerate={handleRegenerate}
             onDownload={handleDownload}
+            width={roomImageWidth}
+            height={roomImageHeight}
           />
         </div>
       </div>
