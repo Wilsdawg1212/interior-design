@@ -1,9 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi import Request
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_inpaint import StableDiffusionInpaintPipeline
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import StableDiffusionImg2ImgPipeline
-from PIL import Image, ImageDraw, ImageFilter
+from diffusers.pipelines.controlnet.pipeline_controlnet import StableDiffusionControlNetPipeline
+from diffusers.models.controlnets.controlnet import ControlNetModel
+from PIL import Image
 import torch
 import io
 import json
@@ -21,23 +21,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
-    "runwayml/stable-diffusion-v1-5",
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-)
-pipe.to("cuda" if torch.cuda.is_available() else "cpu")
+# Load control image (e.g., Canny edges of your composite image)
+controlnet = ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-canny")
+pipe = StableDiffusionControlNetPipeline.from_pretrained(
+    "runwayml/stable-diffusion-v1-5", controlnet=controlnet
+).to("cuda" if torch.cuda.is_available() else "cpu")
+
+from controlnet_aux import CannyDetector
+canny = CannyDetector()
 
 CANVAS_WIDTH = 800  # Must match frontend
 CANVAS_HEIGHT = 384
-
-def create_furniture_mask(image_size, furniture_list):
-    mask = Image.new('L', image_size, 0)  # Black background
-    draw = ImageDraw.Draw(mask)
-    for furniture in furniture_list:
-        x, y = furniture['x'], furniture['y']
-        w, h = furniture['width'], furniture['height']
-        draw.rectangle([x, y, x + w, y + h], fill=255)
-    return mask
 
 @app.post("/inpaint/")
 async def inpaint_image(
@@ -53,28 +47,21 @@ async def inpaint_image(
     # Resize to match frontend canvas if width/height provided
     if width and height:
         img = img.resize((width, height), Image.Resampling.LANCZOS)
-        mask_size = (width, height)
-    else:
-        mask_size = img.size
 
-    # Parse furniture JSON
-    furniture_list = json.loads(furniture)
-    mask = create_furniture_mask(mask_size, furniture_list)
+    # Parse furniture JSON (not used for mask, but may be used for future logic)
+    # furniture_list = json.loads(furniture)
 
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=8))
+    # Generate Canny edge map from the composite image
+    control_image = canny(img)
 
-        # Composite furniture mask over original (if needed)
-    img_np = np.array(img).astype(np.uint8)
-    mask_np = np.array(mask).astype(np.float32) / 255.0
-    blended = (img_np * mask_np[..., None] + img_np * (1 - mask_np[..., None])).astype(np.uint8)
-    blended_img = Image.fromarray(blended)
-
-        # Refine using Img2Img
+    # Run ControlNet pipeline
     result = pipe(
-        prompt="photorealistic object blended into scene, realistic lighting, soft shadows",
-        image=blended_img,
-        strength=0.15,  # Low = gentle refinement
-        guidance_scale=6.5
+        prompt=prompt or "realistic furniture, natural lighting",
+        image=img,
+        control_image=control_image,
+        guidance_scale=7.5,
+        num_inference_steps=4,
+        guess_mode=False
     ).images[0]
 
     # Save result
