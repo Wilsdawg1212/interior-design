@@ -22,9 +22,38 @@ export default function Home() {
   const [roomImageWidth, setRoomImageWidth] = useState(null);
   const [roomImageHeight, setRoomImageHeight] = useState(null);
   const [isRemovingBg, setIsRemovingBg] = useState(false);
+  const [canvasDimensions, setCanvasDimensions] = useState({ width: 800, height: 384 });
 
   const CANVAS_WIDTH = 800;
   const CANVAS_HEIGHT = 384;
+
+  // Calculate display dimensions for the canvas that fit nicely in the UI
+  const getDisplayDimensions = useCallback((originalWidth, originalHeight) => {
+    if (!originalWidth || !originalHeight) return { width: 800, height: 384 };
+    
+    const MAX_DISPLAY_WIDTH = 700; // Reduced to match the 2-column canvas container
+    const MAX_DISPLAY_HEIGHT = 600; // Keep reasonable height
+    
+    const aspectRatio = originalWidth / originalHeight;
+    
+    let displayWidth, displayHeight;
+    
+    if (aspectRatio > 1) {
+      // Landscape - fit to width
+      displayWidth = Math.min(originalWidth, MAX_DISPLAY_WIDTH);
+      displayHeight = Math.round(displayWidth / aspectRatio);
+    } else {
+      // Portrait - fit to height
+      displayHeight = Math.min(originalHeight, MAX_DISPLAY_HEIGHT);
+      displayWidth = Math.round(displayHeight * aspectRatio);
+    }
+    
+    // Ensure minimum display size
+    displayWidth = Math.max(displayWidth, 400);
+    displayHeight = Math.max(displayHeight, 300);
+    
+    return { width: displayWidth, height: displayHeight };
+  }, []);
 
   const handleRoomUpload = useCallback((file) => {
     const reader = new FileReader()
@@ -193,20 +222,67 @@ export default function Home() {
     try {
       // Prepare form data
       const formData = new FormData();
-      // Composite room and furniture into one image
-      const compositeBlob = await compositeRoomWithFurniture(roomImage, furnitureItems, roomImageWidth, roomImageHeight);
+      
+      // Calculate canvas dimensions that preserve the photo's aspect ratio
+      const MAX_WIDTH = 800;
+      const MAX_HEIGHT = 600;
+      
+      let canvasWidth, canvasHeight;
+      const aspectRatio = roomImageWidth / roomImageHeight;
+      
+      if (aspectRatio > 1) {
+        // Landscape image - fit to width
+        canvasWidth = Math.min(roomImageWidth, MAX_WIDTH);
+        canvasHeight = Math.round(canvasWidth / aspectRatio);
+      } else {
+        // Portrait image - fit to height
+        canvasHeight = Math.min(roomImageHeight, MAX_HEIGHT);
+        canvasWidth = Math.round(canvasHeight * aspectRatio);
+      }
+      
+      // Ensure minimum dimensions
+      canvasWidth = Math.max(canvasWidth, 256);
+      canvasHeight = Math.max(canvasHeight, 256);
+      
+      // Store canvas dimensions for the GeneratedImage component
+      setCanvasDimensions({ width: canvasWidth, height: canvasHeight });
+      
+      // Get display dimensions
+      const displayDims = getDisplayDimensions(roomImageWidth, roomImageHeight);
+
+      // Calculate scaling factors from display coordinates to generation canvas coordinates
+      const scaleX = canvasWidth / displayDims.width;
+      const scaleY = canvasHeight / displayDims.height;
+
+      // Scale furniture coordinates from display coordinates to generation canvas coordinates
+      const scaledFurniture = furnitureItems.map(item => {
+        // Convert display coordinates to generation canvas coordinates
+        const canvasX = Math.round(item.position.x * scaleX);
+        const canvasY = Math.round(item.position.y * scaleY);
+        
+        return {
+          ...item,
+          position: {
+            x: canvasX,
+            y: canvasY
+          }
+        };
+      });
+      
+      // Composite room and furniture into one image using calculated dimensions
+      const compositeBlob = await compositeRoomWithFurniture(roomImage, scaledFurniture, canvasWidth, canvasHeight);
       formData.append('image', compositeBlob, 'room.png');
       formData.append('prompt', prompt || 'A beautiful, realistic interior design');
       formData.append('furniture', JSON.stringify(
-        furnitureItems.map(item => ({
+        scaledFurniture.map(item => ({
           x: item.position.x,
           y: item.position.y,
-          width: 100 * item.scale, // assuming 100px base width
-          height: 100 * item.scale // assuming 100px base height
+          width: Math.round(100 * item.scale * scaleX), // assuming 100px base width
+          height: Math.round(100 * item.scale * scaleY) // assuming 100px base height
         }))
       ));
-      formData.append('width', roomImageWidth);
-      formData.append('height', roomImageHeight);
+      formData.append('width', canvasWidth);
+      formData.append('height', canvasHeight);
 
       // Call backend
       const response = await fetch('http://localhost:8000/inpaint/', {
@@ -332,7 +408,7 @@ export default function Home() {
             </motion.div>
           </div>
 
-          {/* Main Canvas Area */}
+          {/* Main Canvas Area - Now Wider */}
           <div className="lg:col-span-2">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -345,8 +421,8 @@ export default function Home() {
                 onFurnitureUpdate={updateFurniturePosition}
                 onFurnitureSelect={selectFurniture}
                 selectedFurniture={selectedFurniture}
-                width={roomImageWidth}
-                height={roomImageHeight}
+                width={getDisplayDimensions(roomImageWidth, roomImageHeight).width}
+                height={getDisplayDimensions(roomImageWidth, roomImageHeight).height}
               />
 
               {/* Prompt input */}
@@ -394,8 +470,11 @@ export default function Home() {
                   disabled={!roomImage || furnitureItems.length === 0}
                   onClick={async () => {
                     try {
-                      if (!roomImageWidth || !roomImageHeight) throw new Error('Room image size not loaded');
-                      const blob = await compositeRoomWithFurniture(roomImage, furnitureItems, roomImageWidth, roomImageHeight);
+                      // Get display dimensions (same as what's shown in the canvas)
+                      const displayDims = getDisplayDimensions(roomImageWidth, roomImageHeight);
+                      
+                      // Use display dimensions directly for the composite
+                      const blob = await compositeRoomWithFurniture(roomImage, furnitureItems, displayDims.width, displayDims.height);
                       const url = URL.createObjectURL(blob);
                       window.open(url, '_blank');
                     } catch (err) {
@@ -444,8 +523,8 @@ export default function Home() {
             isGenerating={isGenerating}
             onRegenerate={handleRegenerate}
             onDownload={handleDownload}
-            width={roomImageWidth}
-            height={roomImageHeight}
+            width={canvasDimensions.width}
+            height={canvasDimensions.height}
           />
         </div>
       </div>

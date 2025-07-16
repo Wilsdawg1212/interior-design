@@ -50,7 +50,7 @@ export default function RoomCanvas({
   onFurnitureSelect, 
   selectedFurniture, 
   width, 
-  height 
+  height
 }) {
   const canvasRef = useRef(null)
 
@@ -59,10 +59,13 @@ export default function RoomCanvas({
     const { active, delta } = event
     const item = furnitureItems.find(f => f.id === active.id)
     if (!item) return
+    
+    // Simply add the delta to the current position
     const newPosition = {
       x: item.position.x + delta.x,
       y: item.position.y + delta.y
     }
+    
     onFurnitureUpdate(item.id, newPosition)
   }, [furnitureItems, onFurnitureUpdate])
 

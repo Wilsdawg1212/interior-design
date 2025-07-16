@@ -71,7 +71,7 @@ async def inpaint_image(
 
         # Refine using Img2Img
     result = pipe(
-        prompt="photorealistic object blended into scene, realistic lighting, soft shadows",
+        prompt="same layout, modern furniture with photorealistic textures, consistent lighting, volumetric shadows, 4k detail, realistic",
         image=blended_img,
         strength=0.15,  # Low = gentle refinement
         guidance_scale=6.5
