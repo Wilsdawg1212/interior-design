@@ -2,13 +2,14 @@
 
 import { useState, useCallback, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Upload, Image, Move, RotateCcw, Download, Sparkles, Settings, Camera } from 'lucide-react'
+import { Upload, Image, Move, RotateCcw, Download, Sparkles, Settings, Camera, Eraser, Square, X } from 'lucide-react'
 import RoomCanvas from './components/RoomCanvas'
 import UploadZone from './components/UploadZone'
 import FurniturePanel from './components/FurniturePanel'
 import Toolbar from './components/Toolbar'
 import GeneratedImage from './components/GeneratedImage'
 import { compositeRoomWithFurniture } from './components/canvasUtils'
+import EraseCanvas from './components/EraseCanvas'
 
 export default function Home() {
   const [roomImage, setRoomImage] = useState(null)
@@ -23,6 +24,7 @@ export default function Home() {
   const [roomImageHeight, setRoomImageHeight] = useState(null);
   const [isRemovingBg, setIsRemovingBg] = useState(false);
   const [canvasDimensions, setCanvasDimensions] = useState({ width: 800, height: 384 });
+  const [canvasMode, setCanvasMode] = useState('design') // 'design' or 'erase'
 
   const CANVAS_WIDTH = 800;
   const CANVAS_HEIGHT = 384;
@@ -272,7 +274,10 @@ export default function Home() {
       // Composite room and furniture into one image using calculated dimensions
       const compositeBlob = await compositeRoomWithFurniture(roomImage, scaledFurniture, canvasWidth, canvasHeight);
       formData.append('image', compositeBlob, 'room.png');
-      formData.append('prompt', prompt || 'A beautiful, realistic interior design');
+      // Only append prompt if it has content, otherwise let backend use default
+      if (prompt && prompt.trim() !== '') {
+        formData.append('prompt', prompt);
+      }
       formData.append('furniture', JSON.stringify(
         scaledFurniture.map(item => ({
           x: item.position.x,
@@ -317,6 +322,67 @@ export default function Home() {
       document.body.removeChild(link)
     }
   }, [generatedImage])
+
+  const handleEraseSelection = useCallback(async (selection) => {
+    if (!roomImage) return
+    
+    try {
+      // Get the display dimensions for the canvas
+      const displayDims = getDisplayDimensions(roomImageWidth, roomImageHeight)
+      
+      // Convert room image to blob for FormData
+      const imageResponse = await fetch(roomImage);
+      const roomBlob = await imageResponse.blob();
+      
+      // Create FormData
+      const formData = new FormData();
+      formData.append('image', roomBlob, 'room.png');
+      formData.append('erasure_spots', JSON.stringify([{
+        x: Math.round(selection.x),
+        y: Math.round(selection.y),
+        width: Math.round(selection.width),
+        height: Math.round(selection.height)
+      }]));
+      formData.append('width', displayDims.width);
+      formData.append('height', displayDims.height);
+      
+      // Call your backend erase endpoint
+      const response = await fetch('http://localhost:8000/inpaint_erasure/', {
+        method: 'POST',
+        body: formData
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to erase selection')
+      }
+      
+      const result = await response.blob()
+      const newRoomImageUrl = URL.createObjectURL(result)
+      
+      // Update the room image with the erased version
+      setRoomImage(newRoomImageUrl)
+      
+      // Clear any furniture that might be in the erased area
+      const erasedFurniture = furnitureItems.filter(item => {
+        const itemRight = item.position.x + (100 * item.scale)
+        const itemBottom = item.position.y + (100 * item.scale)
+        const selectionRight = selection.x + selection.width
+        const selectionBottom = selection.y + selection.height
+        
+        // Check if furniture overlaps with erased area
+        return !(item.position.x < selectionRight && 
+                itemRight > selection.x && 
+                item.position.y < selectionBottom && 
+                itemBottom > selection.y)
+      })
+      
+      setFurnitureItems(erasedFurniture)
+      
+    } catch (error) {
+      console.error('Error erasing selection:', error)
+      alert('Error erasing selection: ' + error.message)
+    }
+  }, [roomImage, furnitureItems, roomImageWidth, roomImageHeight, getDisplayDimensions])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-neutral-50 via-white to-neutral-100">
@@ -415,76 +481,115 @@ export default function Home() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.1 }}
             >
-              <RoomCanvas
-                roomImage={roomImage}
-                furnitureItems={furnitureItems}
-                onFurnitureUpdate={updateFurniturePosition}
-                onFurnitureSelect={selectFurniture}
-                selectedFurniture={selectedFurniture}
-                width={getDisplayDimensions(roomImageWidth, roomImageHeight).width}
-                height={getDisplayDimensions(roomImageWidth, roomImageHeight).height}
-              />
-
-              {/* Prompt input */}
-              <input
-                type="text"
-                value={prompt}
-                onChange={e => setPrompt(e.target.value)}
-                placeholder="Describe your desired room..."
-                className="input-field mb-4 w-full mt-6"
-              />
-
-              {/* Generate Realistic Picture Button */}
-              <div className="mt-2 flex flex-col items-center space-y-2">
-                <motion.button
-                  onClick={handleGenerateRealisticPicture}
-                  disabled={!roomImage || furnitureItems.length === 0 || isGenerating}
-                  className={`
-                    relative group px-6 py-3 rounded-xl font-semibold text-base shadow-lg transition-all duration-300
-                    bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 text-white
-                    hover:shadow-xl hover:scale-105 active:scale-95
-                    ${isGenerating ? 'opacity-75 cursor-not-allowed' : ''}
-                    ${!roomImage || furnitureItems.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}
-                  `}
-                  whileHover={!isGenerating && roomImage && furnitureItems.length > 0 ? { scale: 1.05 } : {}}
-                  whileTap={!isGenerating && roomImage && furnitureItems.length > 0 ? { scale: 0.95 } : {}}
-                >
-                  <div className="flex items-center space-x-2">
-                    {isGenerating ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        <span>Generating...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Camera className="w-4 h-4" />
-                        <span>Generate Realistic Picture</span>
-                      </>
-                    )}
-                  </div>
-                </motion.button>
-                {/* Test Composite Canvas Button */}
+              {/* Mode toggle */}
+              <div className="flex space-x-2 mb-4">
                 <button
-                  type="button"
-                  className="btn-secondary mt-2 px-4 py-2 rounded-lg text-sm font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition"
-                  disabled={!roomImage || furnitureItems.length === 0}
-                  onClick={async () => {
-                    try {
-                      // Get display dimensions (same as what's shown in the canvas)
-                      const displayDims = getDisplayDimensions(roomImageWidth, roomImageHeight);
-                      
-                      // Use display dimensions directly for the composite
-                      const blob = await compositeRoomWithFurniture(roomImage, furnitureItems, displayDims.width, displayDims.height);
-                      const url = URL.createObjectURL(blob);
-                      window.open(url, '_blank');
-                    } catch (err) {
-                      alert('Failed to create composite image: ' + err.message);
-                    }
-                  }}
+                  onClick={() => setCanvasMode('design')}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    canvasMode === 'design' 
+                      ? 'bg-primary-500 text-white' 
+                      : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+                  }`}
                 >
-                  Test Composite Canvas
+                  Design Mode
+                </button>
+                <button
+                  onClick={() => setCanvasMode('erase')}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    canvasMode === 'erase' 
+                      ? 'bg-primary-500 text-white' 
+                      : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+                  }`}
+                >
+                  Erase Mode
                 </button>
               </div>
+
+              {canvasMode === 'erase' ? (
+                <EraseCanvas
+                  roomImage={roomImage}
+                  furnitureItems={furnitureItems}
+                  onEraseSelection={handleEraseSelection}
+                  width={getDisplayDimensions(roomImageWidth, roomImageHeight).width}
+                  height={getDisplayDimensions(roomImageWidth, roomImageHeight).height}
+                />
+              ) : (
+                <RoomCanvas
+                  roomImage={roomImage}
+                  furnitureItems={furnitureItems}
+                  onFurnitureUpdate={updateFurniturePosition}
+                  onFurnitureSelect={selectFurniture}
+                  selectedFurniture={selectedFurniture}
+                  width={getDisplayDimensions(roomImageWidth, roomImageHeight).width}
+                  height={getDisplayDimensions(roomImageWidth, roomImageHeight).height}
+                />
+              )}
+
+              {/* Only show prompt and generate button in design mode */}
+              {canvasMode === 'design' && (
+                <>
+                  {/* Prompt input */}
+                  <input
+                    type="text"
+                    value={prompt}
+                    onChange={e => setPrompt(e.target.value)}
+                    placeholder="Describe your desired room..."
+                    className="input-field mb-4 w-full mt-6"
+                  />
+
+                  {/* Generate Realistic Picture Button */}
+                  <div className="mt-2 flex flex-col items-center space-y-2">
+                    <motion.button
+                      onClick={handleGenerateRealisticPicture}
+                      disabled={!roomImage || furnitureItems.length === 0 || isGenerating}
+                      className={`
+                        relative group px-6 py-3 rounded-xl font-semibold text-base shadow-lg transition-all duration-300
+                        bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 text-white
+                        hover:shadow-xl hover:scale-105 active:scale-95
+                        ${isGenerating ? 'opacity-75 cursor-not-allowed' : ''}
+                        ${!roomImage || furnitureItems.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}
+                      `}
+                      whileHover={!isGenerating && roomImage && furnitureItems.length > 0 ? { scale: 1.05 } : {}}
+                      whileTap={!isGenerating && roomImage && furnitureItems.length > 0 ? { scale: 0.95 } : {}}
+                    >
+                      <div className="flex items-center space-x-2">
+                        {isGenerating ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <span>Generating...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Camera className="w-4 h-4" />
+                            <span>Generate Realistic Picture</span>
+                          </>
+                        )}
+                      </div>
+                    </motion.button>
+                    {/* Test Composite Canvas Button */}
+                    <button
+                      type="button"
+                      className="btn-secondary mt-2 px-4 py-2 rounded-lg text-sm font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition"
+                      disabled={!roomImage || furnitureItems.length === 0}
+                      onClick={async () => {
+                        try {
+                          // Get display dimensions (same as what's shown in the canvas)
+                          const displayDims = getDisplayDimensions(roomImageWidth, roomImageHeight);
+                          
+                          // Use display dimensions directly for the composite
+                          const blob = await compositeRoomWithFurniture(roomImage, furnitureItems, displayDims.width, displayDims.height);
+                          const url = URL.createObjectURL(blob);
+                          window.open(url, '_blank');
+                        } catch (err) {
+                          alert('Failed to create composite image: ' + err.message);
+                        }
+                      }}
+                    >
+                      Test Composite Canvas
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </div>
 

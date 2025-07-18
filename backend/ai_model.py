@@ -4,17 +4,17 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img impo
 from PIL import Image
 import io
 
-from config import MODEL_NAME, TORCH_DTYPE, DEVICE, IMG2IMG_STRENGTH, GUIDANCE_SCALE, DEFAULT_PROMPT
+from config import IMG2IMG_MODEL, INPAINT_MODEL, TORCH_DTYPE, DEVICE, IMG2IMG_STRENGTH, GUIDANCE_SCALE, DEFAULT_PROMPT, ERASURE_PROMPT
 
 def load_img2img_pipeline():
     pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
-        MODEL_NAME,
+        IMG2IMG_MODEL,
         torch_dtype=TORCH_DTYPE
     )
     pipe.to(DEVICE)
     return pipe
 
-pipe = load_img2img_pipeline()
+img2img_pipe = load_img2img_pipeline()
 
 def run_inpainting(pipe, prompt, blended_img):
     result = pipe(
@@ -30,3 +30,22 @@ def run_inpainting(pipe, prompt, blended_img):
         return result[0]
     else:
         raise RuntimeError('Unknown pipeline output format') 
+
+def load_inpaint_pipeline():
+    pipe = StableDiffusionInpaintPipeline.from_pretrained(
+        INPAINT_MODEL,
+        torch_dtype=TORCH_DTYPE
+    )
+    pipe.to(DEVICE)
+    return pipe
+
+inpaint_pipe = load_inpaint_pipeline()
+
+def run_erasure(pipe, img, mask_image):
+    result = pipe(
+        prompt=ERASURE_PROMPT,
+        image=img,
+        mask_image=mask_image,
+        guidance_scale=GUIDANCE_SCALE
+    )
+    return result.images[0]

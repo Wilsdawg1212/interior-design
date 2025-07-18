@@ -4,12 +4,12 @@ from rembg import remove
 
 from config import GAUSSIAN_BLUR_RADIUS
 
-def create_furniture_mask(image_size, furniture_list):
+def create_mask(image_size, spot_list):
     mask = Image.new('L', image_size, 0)  # Black background
     draw = ImageDraw.Draw(mask)
-    for furniture in furniture_list:
-        x, y = furniture['x'], furniture['y']
-        w, h = furniture['width'], furniture['height']
+    for spot in spot_list:
+        x, y = spot['x'], spot['y']
+        w, h = spot['width'], spot['height']
         draw.rectangle([x, y, x + w, y + h], fill=255)
     return mask
 
@@ -24,3 +24,5 @@ def blend_image_with_mask(img, mask):
 
 def remove_background(input_image):
     return remove(input_image) 
+
+

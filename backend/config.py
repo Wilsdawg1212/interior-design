@@ -6,7 +6,8 @@ CANVAS_WIDTH = 800
 CANVAS_HEIGHT = 384
 
 # AI Model settings
-MODEL_NAME = "runwayml/stable-diffusion-v1-5"
+IMG2IMG_MODEL = "runwayml/stable-diffusion-v1-5"
+INPAINT_MODEL = "runwayml/stable-diffusion-inpainting"
 TORCH_DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -20,3 +21,7 @@ DEFAULT_PROMPT = (
     "same layout, modern furniture with photorealistic textures, consistent lighting, "
     "volumetric shadows, 4k detail, realistic"
 ) 
+
+ERASURE_PROMPT = (
+    "same room without object, consistent lighting, 4k detail, realistic"
+)
